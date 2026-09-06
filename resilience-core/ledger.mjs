@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { extractText } from './extraction.mjs';
+import { discoverPhrases } from './discovery.mjs';
 
 // Internal domain API. Actors must come from a trusted authentication/ACL adapter,
 // never from an HTTP request body. No network, model calls or source-file writes.
@@ -45,7 +47,7 @@ export class Ledger {
     this.#db = new DatabaseSync(path);
     const version = this.#db.prepare('PRAGMA user_version').get().user_version;
     const tables = this.#db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-    if (![0, 1].includes(version) || (version === 0 && tables.length)) {
+    if (![0, 1, 2].includes(version) || (version === 0 && tables.length)) {
       this.#db.close();
       fail('Unsupported or unrelated database schema');
     }
@@ -69,7 +71,7 @@ export class Ledger {
         actor TEXT NOT NULL, action TEXT NOT NULL, record_id TEXT NOT NULL REFERENCES records(id),
         created_at TEXT NOT NULL
       ) STRICT;
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
       CREATE INDEX IF NOT EXISTS records_scope ON records(tenant,kind,matter);
       CREATE TRIGGER IF NOT EXISTS records_no_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT, 'Immutable record'); END;
       CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT, 'Immutable record'); END;
@@ -164,7 +166,23 @@ export class Ledger {
     const body = { title: required(input.title, 'title'), type: oneOf(input.type, types, 'artefact type'),
       owner: required(input.owner, 'owner'), extractionVersion: required(input.extractionVersion, 'extractionVersion'),
       inventoryComplete: input.inventoryComplete === true, segments };
+    if (input.provenance) body.provenance = structuredClone(input.provenance);
     return this.#transaction(() => this.#insert(actor, 'artefact', input.key, input.matterId, body, input.expectedVersion));
+  }
+  ingestText(actor, input) {
+    actorContext(actor, true);
+    if (!accessible(actor, required(input.matterId, 'matterId'))) fail('Forbidden');
+    const extraction = extractText(input.bytes, input);
+    if (input.remote) extraction.provenance.remote = structuredClone(input.remote);
+    return this.addArtefact(actor, { ...input, ...extraction });
+  }
+  discover(actor, assertionId, { phrases, limit = 250 }) {
+    actorContext(actor);
+    const assertion = this.#get(actor, assertionId, 'assertion');
+    const source = this.#get(actor, assertion.body.sourceId, 'source');
+    if (![assertion, source].every((record) => this.#current(actor, record))) fail('Evidence version superseded');
+    const artefacts = this.list(actor, 'artefact').filter((record) => this.#current(actor, record));
+    return { assertionId, ...discoverPhrases(artefacts, phrases, limit) };
   }
   proposeDependency(actor, input) {
     actorContext(actor, true);
@@ -324,6 +342,201 @@ export class Ledger {
     });
     return { sourceId, tasks, discoveryRequired: true,
       caveat: 'Known dependencies only. New obligations, unknown links and applicability require a separate review. No edits were published.' };
+  }
+  proposeChangeSet(actor, input) {
+    actorContext(actor, true);
+    const expiresAt = Date.parse(input.reviewExpiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) fail('Future review expiry required');
+    if (!Array.isArray(input.items) || !input.items.length || input.items.length > 50) fail('Provide 1–50 changes');
+    return this.#transaction(() => {
+      const seen = new Set(); const targets = new Set(); let matter;
+      const items = input.items.map((proposed) => {
+        const assessment = this.#get(actor, proposed.assessmentId, 'assessment');
+        const view = this.#assessmentView(actor, assessment);
+        if (view.workflow !== 'approved' || assessment.body.mode !== 'current_review'
+          || !['potential_conflict', 'potential_gap', 'stale_reference'].includes(assessment.body.finding)
+          || assessment.body.limitations.length || !assessment.body.contextComplete) fail('Approved actionable assessment required');
+        const artefact = this.#get(actor, assessment.body.artefactId, 'artefact');
+        if (['executed', 'control'].includes(artefact.body.type)) fail('Separate legal variation or control release workflow required');
+        if (!artefact.body.inventoryComplete || artefact.body.segments.length !== 1
+          || artefact.body.segments[0].state !== 'available') fail('Publication currently supports complete single-segment text only');
+        if (seen.has(artefact.id)) fail('One change per artefact per change set');
+        seen.add(artefact.id);
+        if (matter !== undefined && matter !== artefact.matter) fail('A change set must stay within one matter');
+        matter = artefact.matter;
+        const beforeText = artefact.body.segments[0].text;
+        const evidence = assessment.body.evidence;
+        if (!validSpan(beforeText, evidence)) fail('Invalid publication anchor');
+        const replacement = required(proposed.replacement, 'replacement');
+        const afterText = beforeText.slice(0, evidence.start) + replacement + beforeText.slice(evidence.end);
+        if (afterText === beforeText || Buffer.byteLength(afterText) > 1024 * 1024) fail('Invalid or unchanged replacement');
+        const target = artefact.body.provenance?.remote;
+        if (!target || target.matterId !== matter || !['driveId', 'folderId', 'itemId', 'eTag', 'hash']
+          .every((key) => typeof target[key] === 'string' && target[key].trim())) fail('Versioned publication target required');
+        if (target.hash !== hash(beforeText)) fail('Imported bytes do not match publication text');
+        const targetKey = JSON.stringify([target.driveId, target.itemId]);
+        if (targets.has(targetKey)) fail('Duplicate publication target');
+        targets.add(targetKey);
+        if (input.rollbackOf) {
+          const prior = this.#get(actor, input.rollbackOf, 'publication');
+          if (!prior.body.publishedArtefactId || prior.body.publishedArtefactId !== artefact.id) fail('Rollback reference does not match target');
+        }
+        return { assessmentId: assessment.id, assessmentRevision: view.decision.revision,
+          artefactId: artefact.id, assertionId: assessment.body.assertionId, sourceId: assessment.body.sourceId,
+          owner: artefact.body.owner, target, beforeText, afterText, afterHash: hash(afterText), artefactType: artefact.body.type };
+      });
+      const changeSet = this.#insert(actor, 'change_set', input.key, matter, {
+        title: required(input.title, 'change-set title'), rationale: required(input.rationale, 'change rationale'),
+        reviewExpiresAt: new Date(expiresAt).toISOString(), items, rollbackOf: input.rollbackOf ?? null,
+      }, 0);
+      items.forEach((item, index) => this.#insert(actor, 'publication', `${changeSet.id}:${index}`, matter,
+        { changeSetId: changeSet.id, index, status: 'queued', attempts: 0, receipt: null }, 0));
+      return this.getChangeSet(actor, changeSet.id);
+    });
+  }
+  #ownerDecision(actor, changeSet, index) {
+    return this.#latest(actor, 'owner_review', `${changeSet.id}:${index}`);
+  }
+  reviewOwnership(actor, id, { index, disposition, reason, expectedVersion }) {
+    actorContext(actor, true);
+    oneOf(disposition, ['approved', 'rejected'], 'owner disposition'); required(reason, 'owner reason');
+    return this.#transaction(() => {
+      const changeSet = this.#get(actor, id, 'change_set');
+      if (!Number.isSafeInteger(index) || changeSet.body.items[index]?.owner !== actor.userId) fail('Only the recorded owner may decide');
+      return this.#insert(actor, 'owner_review', `${id}:${index}`, changeSet.matter,
+        { changeSetId: id, index, disposition, reason, actor: actor.userId }, expectedVersion);
+    });
+  }
+  #itemFresh(actor, item, publishedArtefactId) {
+    const assessment = this.#get(actor, item.assessmentId, 'assessment');
+    return [[item.assertionId, 'assertion'], [item.sourceId, 'source'], [assessment.id, 'assessment'],
+      [publishedArtefactId ?? item.artefactId, 'artefact']]
+      .every(([id, kind]) => this.#current(actor, this.#get(actor, id, kind)))
+      && this.#decision(assessment.id)?.disposition === 'approved'
+      && this.#decision(assessment.id)?.revision === item.assessmentRevision;
+  }
+  #jobs(actor, changeSet) {
+    return changeSet.body.items.map((_, index) => this.#latest(actor, 'publication', `${changeSet.id}:${index}`));
+  }
+  getChangeSet(actor, id) {
+    actorContext(actor);
+    const changeSet = this.#get(actor, id, 'change_set');
+    const jobs = this.#jobs(actor, changeSet);
+    const stale = Date.parse(changeSet.body.reviewExpiresAt) <= Date.now()
+      || changeSet.body.items.some((item, index) => !this.#itemFresh(actor, item, jobs[index]?.body.publishedArtefactId));
+    const decision = this.#decision(id);
+    const approved = decision?.disposition === 'approved';
+    const ownerReviews = changeSet.body.items.map((_, index) => this.#ownerDecision(actor, changeSet, index));
+    const published = jobs.filter((job) => job.body.status.startsWith('published')).length;
+    const ownersApproved = ownerReviews.every((review) => review?.body.disposition === 'approved');
+    const status = published === jobs.length ? (stale || !approved || !ownersApproved ? 'published_review_required' : 'published')
+      : published > 0 ? 'partially_published' : stale ? 'review_required'
+        : !approved ? decision?.disposition ?? 'unreviewed'
+          : !ownersApproved ? 'awaiting_owner_review' : 'approved';
+    return { ...changeSet, status, stale, jobs, ownerReviews,
+      decision: decision ? { revision: decision.revision, disposition: decision.disposition, actor: decision.actor, reason: decision.reason } : null };
+  }
+  reviewChangeSet(actor, id, { disposition, reason, expectedRevision }) {
+    actorContext(actor, true, true);
+    oneOf(disposition, ['approved', 'rejected'], 'change-set disposition'); required(reason, 'review reason');
+    return this.#transaction(() => {
+      const view = this.getChangeSet(actor, id);
+      if (expectedRevision !== (view.decision?.revision ?? 0)) fail('Review conflict');
+      if (disposition === 'approved' && view.stale) fail('Change-set evidence superseded or expired');
+      this.#db.prepare('INSERT INTO decisions(record_id,revision,disposition,reason,actor,created_at) VALUES(?,?,?,?,?,?)')
+        .run(id, expectedRevision + 1, disposition, reason, actor.userId, new Date().toISOString());
+      this.#event(actor, `change_set.${disposition}`, view);
+      return this.getChangeSet(actor, id);
+    });
+  }
+  // Worker-only operations below are intentionally absent from the public service whitelist.
+  claimPublication(actor, id) {
+    actorContext(actor, true);
+    return this.#transaction(() => {
+      const requested = this.#get(actor, id, 'publication');
+      const job = this.#latest(actor, 'publication', requested.logical_key);
+      const changeSet = this.#get(actor, job.body.changeSetId, 'change_set');
+      const item = changeSet.body.items[job.body.index];
+      if (job.body.status.startsWith('published')) return job;
+      if (job.body.status === 'running' || job.body.status === 'reconciliation_required') fail('Publication requires reconciliation');
+      if (job.body.status === 'blocked' || job.body.attempts >= 3) fail('Publication blocked');
+      if ((job.body.retryAfter ?? 0) > Date.now()) fail('Retry backoff active');
+      if (this.#decision(changeSet.id)?.disposition !== 'approved'
+        || this.#ownerDecision(actor, changeSet, job.body.index)?.body.disposition !== 'approved') fail('Legal and owner approvals required');
+      if (Date.parse(changeSet.body.reviewExpiresAt) <= Date.now() || !this.#itemFresh(actor, item)) fail('Change-set evidence superseded or expired');
+      return this.#insert(actor, 'publication', job.logical_key, job.matter, { ...job.body,
+        status: 'running', attempts: job.body.attempts + 1, worker: actor.userId,
+        leaseId: randomUUID(), leaseExpiresAt: Date.now() + 60000,
+      }, job.version);
+    });
+  }
+  publicationInput(actor, id) {
+    actorContext(actor, true);
+    const job = this.#get(actor, id, 'publication');
+    if (!this.#current(actor, job) || job.body.status !== 'running' || job.body.worker !== actor.userId) fail('Publication lease unavailable');
+    const changeSet = this.#get(actor, job.body.changeSetId, 'change_set');
+    const item = changeSet.body.items[job.body.index];
+    if (job.body.leaseExpiresAt <= Date.now() || !this.#itemFresh(actor, item)
+      || Date.parse(changeSet.body.reviewExpiresAt) <= Date.now()
+      || this.#decision(changeSet.id)?.disposition !== 'approved'
+      || this.#ownerDecision(actor, changeSet, job.body.index)?.body.disposition !== 'approved') fail('Publication approval expired or revoked');
+    return structuredClone(item);
+  }
+  #recordPublished(actor, job, receipt) {
+    const changeSet = this.#get(actor, job.body.changeSetId, 'change_set');
+    const item = changeSet.body.items[job.body.index];
+    if (receipt.itemId !== item.target.itemId || receipt.beforeETag !== item.target.eTag
+      || receipt.hash !== item.afterHash || !receipt.afterETag || receipt.afterETag === receipt.beforeETag) fail('Invalid publication receipt');
+    const original = this.#get(actor, item.artefactId, 'artefact');
+    const approvalsCurrent = this.#itemFresh(actor, item) && Date.parse(changeSet.body.reviewExpiresAt) > Date.now()
+      && this.#decision(changeSet.id)?.disposition === 'approved'
+      && this.#ownerDecision(actor, changeSet, job.body.index)?.body.disposition === 'approved';
+    let publishedArtefactId = null;
+    if (this.#current(actor, original)) {
+      const body = structuredClone(original.body);
+      body.segments[0].text = item.afterText;
+      body.provenance = { ...body.provenance, contentHash: item.afterHash, byteLength: Buffer.byteLength(item.afterText),
+        remote: { ...item.target, eTag: receipt.afterETag, hash: receipt.hash }, changeSetId: changeSet.id };
+      publishedArtefactId = this.#insert(actor, 'artefact', original.logical_key, original.matter, body, original.version).id;
+    }
+    return this.#insert(actor, 'publication', job.logical_key, job.matter, { ...job.body,
+      status: publishedArtefactId && approvalsCurrent ? 'published' : 'published_review_required', receipt,
+      publishedArtefactId, completedAt: new Date().toISOString(), leaseId: null,
+    }, job.version);
+  }
+  finishPublication(actor, id, { leaseId, receipt, failure, retryAfterMs = 0 }) {
+    actorContext(actor, true);
+    return this.#transaction(() => {
+      const job = this.#get(actor, id, 'publication');
+      if (!this.#current(actor, job) || job.body.status !== 'running' || job.body.worker !== actor.userId
+        || job.body.leaseId !== leaseId) fail('Publication lease conflict');
+      if (receipt) return this.#recordPublished(actor, job, receipt);
+      oneOf(failure, ['retryable', 'blocked', 'reconciliation_required'], 'publication failure');
+      if (!Number.isFinite(retryAfterMs) || retryAfterMs < 0) fail('Invalid retry delay');
+      return this.#insert(actor, 'publication', job.logical_key, job.matter, { ...job.body,
+        status: failure, retryAfter: Date.now() + Math.max(retryAfterMs, 1000 * 2 ** job.body.attempts), leaseId: null,
+      }, job.version);
+    });
+  }
+  reconcilePublication(actor, id, { observedETag, observedHash, reason }) {
+    actorContext(actor, true, true); required(reason, 'reconciliation reason');
+    return this.#transaction(() => {
+      const requested = this.#get(actor, id, 'publication');
+      const job = this.#latest(actor, 'publication', requested.logical_key);
+      const changeSet = this.#get(actor, job.body.changeSetId, 'change_set');
+      const item = changeSet.body.items[job.body.index];
+      if (item.owner !== actor.userId) fail('Reconciliation requires the owner with reviewer authority');
+      if (job.body.status !== 'reconciliation_required'
+        && !(job.body.status === 'running' && job.body.leaseExpiresAt <= Date.now())) fail('No interrupted publication to reconcile');
+      if (observedHash === item.afterHash && observedETag !== item.target.eTag) {
+        return this.#recordPublished(actor, job, { itemId: item.target.itemId, beforeETag: item.target.eTag,
+          afterETag: observedETag, hash: observedHash, reconciliationReason: reason, attribution: 'Observed desired content; original write acknowledgement was unavailable' });
+      }
+      const unchanged = observedHash === item.target.hash && observedETag === item.target.eTag;
+      return this.#insert(actor, 'publication', job.logical_key, job.matter, { ...job.body,
+        status: unchanged && job.body.attempts < 3 ? 'queued' : 'blocked', leaseId: null, reconciliationReason: reason,
+      }, job.version);
+    });
   }
   audit(actor) {
     actorContext(actor);

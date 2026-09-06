@@ -1,0 +1,17 @@
+{
+  "syntheticOnly": true,
+  "version": "phrase-baseline-v1",
+  "phrases": ["incident owner", "record acknowledgement"],
+  "cases": [
+    {"id":"template","family":"a","relevant":true,"severe":false,"text":"Notify the incident owner."},
+    {"id":"checklist","family":"b","relevant":true,"severe":false,"text":"Record acknowledgement before closing the incident."},
+    {"id":"playbook","family":"c","relevant":true,"severe":false,"text":"Escalate to the INCIDENT OWNER."},
+    {"id":"training","family":"d","relevant":true,"severe":false,"text":"Staff should notify the incident owner and record acknowledgement."},
+    {"id":"implicit-duty","family":"e","relevant":true,"severe":true,"text":"Contact the designated response lead and retain proof of receipt."},
+    {"id":"unparsed-scan","family":"f","relevant":true,"severe":true,"text":null},
+    {"id":"glossary","family":"g","relevant":false,"severe":false,"text":"The term incident owner appears in this unrelated glossary exercise."},
+    {"id":"marketing","family":"h","relevant":false,"severe":false,"text":"Our fictional product is named Incident Owner."},
+    {"id":"fees","family":"i","relevant":false,"severe":false,"text":"Fees are agreed separately."},
+    {"id":"holiday","family":"j","relevant":false,"severe":false,"text":"The holiday calendar is reviewed annually."}
+  ]
+}

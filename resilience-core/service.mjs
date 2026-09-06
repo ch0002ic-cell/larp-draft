@@ -4,6 +4,8 @@ const operations = new Set([
   'get', 'list', 'addSource', 'addAssertion', 'addArtefact', 'proposeDependency',
   'reviewDependency', 'proposeAssessment', 'getAssessment', 'reviewAssessment',
   'coverage', 'planSourceChange', 'audit',
+  'ingestText', 'discover',
+  'proposeChangeSet', 'getChangeSet', 'reviewChangeSet', 'reviewOwnership',
 ]);
 const nonempty = (value) => typeof value === 'string' && value.trim().length > 0;
 const denied = () => { throw new Error('Access denied'); };
@@ -25,7 +27,7 @@ export function createLedgerService({ ledger, verifySession, resolveAccess, now 
           || !Number.isSafeInteger(session.expiresAt) || session.expiresAt <= now()) denied();
         const identity = Object.freeze({ subject: session.subject, tenantId: session.tenantId });
         const expiresAt = session.expiresAt;
-        const access = await resolveAccess(identity);
+        const access = await resolveAccess(identity, { credential });
         if (!access || access.active !== true || access.subject !== identity.subject
           || access.tenantId !== identity.tenantId || !nonempty(access.userId)
           || !nonempty(access.aclVersion) || !Array.isArray(access.roles)

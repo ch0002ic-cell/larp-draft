@@ -1,0 +1,17 @@
+{
+  "name": "larp-resilience-core",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "demo": "node workflow-demo.mjs",
+    "evaluate": "node evaluate.mjs"
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  }
+}

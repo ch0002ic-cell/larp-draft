@@ -1,0 +1,15 @@
+{
+  "tenantId": "REPLACE_WITH_ENTRA_TENANT_GUID",
+  "clientId": "REPLACE_WITH_API_APP_GUID",
+  "allowedClientIds": ["REPLACE_WITH_FRONTEND_APP_GUID"],
+  "scope": "access_as_user",
+  "groupMappings": [
+    { "groupId": "REPLACE_WITH_TENANT_REVIEWER_GROUP_GUID", "roles": ["reviewer"], "matterIds": [] },
+    { "groupId": "REPLACE_WITH_TENANT_EDITOR_GROUP_GUID", "roles": ["editor"], "matterIds": [] },
+    { "groupId": "REPLACE_WITH_MATTER_ACCESS_GROUP_GUID", "roles": ["reader"], "matterIds": ["pilot-matter"] }
+  ],
+  "folders": [
+    { "matterId": "pilot-matter", "driveId": "REPLACE_WITH_APPROVED_DRIVE_ID", "folderId": "REPLACE_WITH_APPROVED_FOLDER_ITEM_ID" }
+  ],
+  "transferHosts": ["REPLACE_WITH_EXACT_TENANT_SHAREPOINT_HOST"]
+}

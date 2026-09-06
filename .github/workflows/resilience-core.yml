@@ -1,0 +1,30 @@
+name: Resilience core
+
+on:
+  push:
+    branches: [main]
+    paths: ['resilience-core/**', '.github/workflows/resilience-core.yml']
+  pull_request:
+    paths: ['resilience-core/**', '.github/workflows/resilience-core.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.2'
+          cache: npm
+          cache-dependency-path: resilience-core/package-lock.json
+      - run: npm ci --prefix resilience-core --ignore-scripts --no-audit --no-fund
+      - run: npm test --prefix resilience-core
+      - run: npm run demo --prefix resilience-core
+      - run: npm run evaluate --prefix resilience-core
