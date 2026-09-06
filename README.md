@@ -131,34 +131,37 @@ The original whiteboard’s local database/local AI and the submission’s seman
 
 ## Resilience foundation
 
-**Implemented in `larp-Ric`, 6 September 2026.** The additive [ledger](resilience-core/ledger.mjs) and its services remain separate from the preserved Next.js app: no existing routes, components, app dependencies or runtime configuration were changed. The local domain core uses Node built-ins and SQLite. The optional Microsoft integration uses the isolated module's pinned `jose` dependency and makes Entra/Graph/SharePoint requests only when explicitly invoked with configuration and credentials.
+**Implemented in `larp-Ric`, 6 September 2026.** The additive [ledger](resilience-core/ledger.mjs) and its services remain separate from the preserved Next.js app: no existing routes, components, app dependencies or runtime configuration were changed. The local domain core uses Node built-ins and SQLite. The isolated module pins its JWT, PDF, ZIP and XML dependencies separately from the app. Microsoft adapters make Entra/Graph/SharePoint requests only when explicitly invoked with configuration and credentials; document parsing and deterministic discovery require no hosted model.
 
 The implemented maintenance cycle pins source, assertion and artefact versions; discovers candidate dependencies; records scoped legal assessments; requires legal and owner approval for proposed text revisions; persists publication jobs and receipts; and supports reconciliation and separately approved rollback. Records and audit events commit atomically. Optimistic versions prevent conflicting local writes, while remote publication carries the expected target version and verifies retrieved content afterwards. These are prototype capabilities, not a completed production pilot.
 
 ### Run and verify
 
-Use **Node 22.16 or later** with `node:sqlite`; development validation uses **22.23.2**. Install only the isolated module's dependency:
+Use **Node 22.16 or later** with `node:sqlite`; development validation uses **22.23.2**. Install only the isolated module's dependencies:
 
 ```bash
 npm ci --prefix resilience-core --ignore-scripts
 npm test --prefix resilience-core
 npm run demo --prefix resilience-core
 npm run evaluate --prefix resilience-core
+npm run evaluate --prefix resilience-core -- --mode hybrid
+npm run demo:formats --prefix resilience-core
 ```
 
 The [workflow demo](resilience-core/workflow-demo.mjs) creates fresh temporary ledger and destination databases. It exercises a synthetic source change across a template, checklist and playbook; candidate discovery; manual assessment; legal/owner approval; partial publication; a lost acknowledgement; restart/reconciliation; and backup/restore. It preserves the original versions. Printed timing, CPU and file-size measurements describe that run only; they are not pilot latency, total storage, energy or human-effort measurements. No network or model calls occur in this demo.
 
 The earlier [evidence demo](resilience-core/demo.mjs) remains available with `node resilience-core/demo.mjs [new-database-path]`. It shows extraction gaps, approval invalidation and the distinct executed-agreement review route. Both demos use synthetic identities and rules, not Singapore law or client documents.
 
-Validation: **68 tests pass**, covering evidence and scope, session/permission checks, ingestion gaps, discovery limits, signed-token validation, Microsoft error/redirect handling, cached-access revocation, coordinated approvals, interrupted publication, concurrent edits, bounded retries, rollback and restore. The isolated dependency audit reported zero known vulnerabilities on 6 September 2026; that is not a security certification. [CI](.github/workflows/resilience-core.yml) runs the tests, workflow demo and evaluation on pushes affecting the module. App lint/build were not run because the existing app and its dependencies were unchanged and its `node_modules`/Bun environment is absent.
+Validation: **80 tests pass**, covering evidence and scope, session/permission checks, ingestion gaps, discovery limits, signed-token validation, Microsoft error/redirect handling, cached-access revocation, coordinated approvals, interrupted publication, concurrent edits, bounded retries, rollback/restore, PDF/DOCX extraction, parser limits and citation/proximity retrieval. The isolated dependency audit reported zero known vulnerabilities on 6 September 2026; that is not a security certification. [CI](.github/workflows/resilience-core.yml) runs the tests, workflow demo and evaluation on pushes affecting the module. App lint/build were not run because the existing app and its dependencies were unchanged and its `node_modules`/Bun environment is absent.
 
 ### Domain API and review boundaries
 
 | Operation | Implemented contract |
 | --- | --- |
 | `addSource`, `addArtefact`, `ingestText` | Append immutable versions with expected-version checks. Text ingestion preserves exact UTF-8, hashes original bytes, and records unsupported, invalid or oversized input as a visible extraction failure. |
+| `ingestDocument` (service) | Extract plain text, PDF or DOCX in the generic service, rechecking identity and permissions after asynchronous parsing. Microsoft uses its verified SharePoint import path. |
 | `addAssertion` | A reviewer records interpretation, applicability, exceptions and an exact source span. This is an attributed human decision, not automated verification that the interpretation is legally correct. |
-| `discover`, `discoverLiteralCandidates` | Search current permitted artefacts with explicit phrases, or perform the original literal baseline. Candidates retain exact evidence; caps, unavailable segments and incomplete inventories are reported. No hit is not clearance. |
+| `discover`, `discoverLiteralCandidates` | Search current permitted artefacts using phrase or deterministic hybrid mode, or perform the original literal baseline. Candidates retain exact evidence; result/workload caps, unavailable segments and incomplete inventories are reported. No hit is not clearance. |
 | `proposeDependency`, `reviewDependency` | Keep candidates separate from confirmed relationships. Invalid evidence stays blocked; corrections create a new version requiring review. |
 | `proposeAssessment`, `reviewAssessment`, `getAssessment` | Store a manual finding for one assertion/segment, evidence, applicability, severity, limitations and current-review/readiness mode. Review revision conflicts are rejected; changed evidence invalidates current approval without erasing history. |
 | `coverage`, `planSourceChange` | Report extraction and assertion-scoped findings, or compute tasks from confirmed known dependencies. Plans always require additional discovery; neither operation proves whole-document coverage. |
@@ -170,6 +173,24 @@ The [generic service boundary](resilience-core/service.mjs) exposes `createLedge
 
 A no-impact assessment requires a complete supplied extraction inventory, available segments, explicitly complete context and no unresolved limitations. These checks cannot establish that an omitted attachment was never present. Approved `insufficient_evidence` findings acknowledge a gap; they do not clear it. Proposal/uncommenced sources require readiness assessments and cannot enter the current-remediation publication queue. Snapshot currency is the latest stored version, not a legal commencement or applicability calculation.
 
+### Rich-document extraction and broader discovery
+
+[Document extraction](resilience-core/document-extraction.mjs) retains the original byte hash, parser version and immutable extracted text. PDF evidence offsets refer to stored extracted page text, and DOCX offsets to stored package-part text; neither is a byte offset in the original binary or a guaranteed rendered-document position. The [format demo](resilience-core/format-demo.mjs) generates its own PDF/DOCX fixtures and demonstrates candidate retrieval with visible gaps.
+
+PDF parsing uses pinned [PDF.js](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html) to extract text page by page. Empty/scan-like pages remain failed with an OCR/review reason. A retained review gap covers unexamined visual layout, graphics, forms, annotations and embedded attachments. DOCX parsing uses [yauzl](https://github.com/thejoshwolfe/yauzl) and [saxes](https://github.com/lddubeau/saxes) to read UTF-8 Word XML, including body/table text, standard-named headers, footers, footnotes, endnotes and comments. It preserves both inserted/deleted wording where present and flags unresolved revision meaning, fields, hidden text, unsupported parts and external relationships. It does not follow links or resolve XML entities/DTDs.
+
+Both rich formats deliberately remain `inventoryComplete: false` pending review of non-text content and layout. Text extraction is useful evidence, but it does not clear a document or authorize binary publication. OCR, custom Word-part mappings, UTF-16 XML, visual table reconstruction and Word tracked-change editing remain unimplemented. The existing plain-text publication restrictions still apply.
+
+Parsing runs in a worker with a 10-second deadline, a 128 MiB JavaScript old-generation limit and a 4 MiB stack limit. Raw inputs are capped at 1 MiB; DOCX at 256 package entries and 8 MiB declared expansion; extracted output at 2 MiB; PDF processing at 200 pages. Unprocessed page counts and parser failures stay visible. Duplicate/traversing ZIP paths, encrypted entries, invalid parsed-part CRCs and DTDs are rejected. Worker limits do not bound all native allocations or constitute an OS security sandbox; production parser isolation still needs deployment validation. Parser diagnostics are drained without copying document text into application logs.
+
+`discover` accepts `mode: "phrases"` (default) or `mode: "hybrid"`. Hybrid mode combines whitespace-tolerant phrases, query terms within eight words, and instrument aliases near an explicit section reference. For example, a **synthetic** query is:
+
+```json
+{"mode":"hybrid","phrases":["incident owner"],"citations":[{"instrumentAliases":["Synthetic Act"],"provision":"24"}],"limit":100}
+```
+
+Candidates identify their matching strategies, exact evidence and nearby negation/exception signals. Scores only order deterministic matches; citation proximity does not establish applicability, and these signals are not legal findings. Search is bounded to 65,536 characters per segment and 2,097,152 characters per request. Oversized/unprocessed segments increment `unsearchedSegments` and set `truncated`; they are not counted as searched negatives. Semantic embeddings/model inference have not been introduced.
+
 ### Microsoft Entra ID and SharePoint integration
 
 The team selected **Microsoft Entra ID and SharePoint** for the first real integration. [Microsoft adapters](resilience-core/microsoft.mjs), the [runtime](resilience-core/microsoft-runtime.mjs) and an [operator CLI](resilience-core/microsoft-cli.mjs) are implemented and tested against simulated responses. **No live tenant connection, consent grant or SharePoint publication has been performed.**
@@ -178,7 +199,7 @@ The runtime validates single-tenant v2 access tokens using `jose`: signature, is
 
 Configuration maps Entra groups to **tenant-wide roles** and matter access. Role grants apply across all matters that user may access; this version does not support different reviewer/editor roles per matter. Use separate role and matter-access groups as illustrated in [the configuration template](resilience-core/microsoft.example.json). Shared legal sources/assertions are tenant-readable; artefacts and their derivatives are matter-scoped. The runtime also verifies SharePoint metadata access for retained artefacts, including historical versions. If any retained item is denied or moved outside its configured folder, it withholds that entire matter and its cached derivatives. This conservative policy can block otherwise readable documents; it is bounded to 500 distinct retained targets per operation and is not a scalable fine-grained ACL synchronizer.
 
-SharePoint import is limited to direct children of explicitly configured drive/folder pairs. It rechecks access and version before storing extracted content. Preauthenticated transfer URLs must use exact configured HTTPS hosts; redirects are refused and bearer tokens are never attached to transfer URLs. Imported text has a **1 MiB** limit. The current extractor supports `text/plain`; PDFs, DOCX and scans remain visible gaps pending format-specific extraction and validation against the approved corpus.
+SharePoint import is limited to direct children of explicitly configured drive/folder pairs. It rechecks access and version before storing extracted content. Preauthenticated transfer URLs must use exact configured HTTPS hosts; redirects are refused and bearer tokens are never attached to transfer URLs. Imported text has a **1 MiB** limit. The importer supports plain-text, PDF and DOCX extraction as described above. OCR and representative-corpus validation remain outstanding.
 
 For a configured environment:
 
@@ -192,7 +213,7 @@ CLI request shapes are:
 
 | Command | JSON input |
 | --- | --- |
-| `execute` | `{ "operation": "list", "args": ["artefact"] }` or another public domain operation. Direct `addArtefact`/`ingestText` is disabled in the Microsoft runtime; use verified import. |
+| `execute` | `{ "operation": "list", "args": ["artefact"] }` or another public domain operation. Direct `addArtefact`/`ingestText`/`ingestDocument` is disabled in the Microsoft runtime; use verified import. |
 | `import` | `{ "key": "stable-key", "expectedVersion": 0, "title": "Pilot template", "type": "template", "owner": "OWNER_ENTRA_OBJECT_ID", "attachmentsComplete": false, "target": { "matterId": "pilot-matter", "driveId": "DRIVE_ID", "folderId": "FOLDER_ID", "itemId": "ITEM_ID" } }` |
 | `publish` | `{ "jobId": "QUEUED_PUBLICATION_RECORD_ID" }` after the assessment, change-set and owner decisions have been recorded. |
 | `reconcile` | `{ "jobId": "INTERRUPTED_PUBLICATION_RECORD_ID", "reason": "Record the destination comparison and decision" }`; requires the recorded owner with reviewer authority. |
@@ -209,7 +230,7 @@ Database schema **2** retains the append-only records/decisions/events tables an
 
 ### Evaluation and remaining delivery gates
 
-The [evaluation harness](resilience-core/evaluate.mjs) accepts labeled cases, rejects duplicate IDs and document-family leakage between train/test partitions, retains extraction abstentions in the recall denominator, and reports raw counts. The bundled [10-case synthetic corpus](resilience-core/evaluation-corpus.json) produces **4/6 dependency recall and 4/6 candidate precision**, with two severe misses: an implicit dependency and an unparsed scan. Candidate precision is not finding precision; legal finding precision and pilot gates remain unevaluated. This baseline demonstrates why lexical matching alone is insufficient. Do not tune on the future held-out corpus or present these synthetic labels as lawyer-adjudicated ground truth.
+The [evaluation harness](resilience-core/evaluate.mjs) accepts labeled cases, rejects duplicate IDs and document-family leakage between train/test partitions, retains extraction abstentions in the recall denominator, and reports raw counts. Both phrase and hybrid modes on the unchanged [10-case synthetic corpus](resilience-core/evaluation-corpus.json) produce **4/6 dependency recall and 4/6 candidate precision**, with two severe misses: an implicit dependency and an unparsed scan. Candidate precision is not finding precision; legal finding precision and pilot gates remain unevaluated. The harness refuses to report metrics if a retrieval budget leaves search incomplete. These results expose the limitations of the current deterministic baselines. Do not tune on the future held-out corpus or present these synthetic labels as lawyer-adjudicated ground truth.
 
 The team says a reviewer and approved pilot corpus are available; their identities, access location and scope have not yet been provided. The [draft review-pack template](resilience-core/review-pack.example.json) records the needed source versions/hashes, interpretation, applicability, exceptions and positive/negative/missing-context examples. Filling the template does not itself approve an assertion; the authenticated reviewer must record the decision through the ledger.
 
@@ -217,7 +238,7 @@ The team says a reviewer and approved pilot corpus are available; their identiti
 | --- | --- |
 | Live Microsoft integration | Supply tenant/API/frontend IDs, group mappings, approved folder IDs and transfer hosts; configure secrets locally; complete administrator consent and exercise delegated access, revocation, conflicts and recovery in the approved tenant. |
 | Legal rule pack and corpus | Identify the reviewer and corpus permission reference/location; select the recurring workflow; import approved evidence and record reviewed assertions with applicability and exceptions. No real legal rule pack has been approved by this work. |
-| Broader discovery and extraction | Validate PDF/DOCX/OCR coverage and explicit citation/semantic discovery using representative permitted files. Select any model/deployment after the partner's data-handling decision; no hosted model calls or embedding pipeline have been added. |
+| Broader discovery and extraction | Validate the implemented PDF/DOCX and citation/proximity baselines on representative permitted files; add approved OCR, richer layout handling and evaluated semantic discovery. Select any model/deployment after the partner's data-handling decision; no hosted model calls or embedding pipeline have been added. |
 | Legal/source maintenance | Implement approved source feeds, terms/access-window controls, provision-level commencement/transition reasoning and recurring rediscovery after the source set and reviewer-approved rules are defined. Source snapshots can currently be entered manually. |
 | Product integration | Connect the tested services to a chosen user-facing workflow, including sign-in, review/owner queues and accessible error states. The existing hackathon web app remains unchanged, so these services are not exposed there. |
 | Production operations | Validate protection/retention/deletion, multi-user load, sustained worker scheduling, recovery objectives and deployment configuration. Current tests cover local SQLite and simulated Microsoft failures, not a production service. |

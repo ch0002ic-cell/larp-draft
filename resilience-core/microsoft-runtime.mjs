@@ -1,6 +1,7 @@
 import { createMicrosoftAdapters, createSharePointAdapter } from './microsoft.mjs';
 import { createLedgerService } from './service.mjs';
 import { createPublicationWorker } from './publication-worker.mjs';
+import { extractDocument } from './document-extraction.mjs';
 
 export function createMicrosoftRuntime({ ledger, config, clientSecret }, dependencies = {}) {
   const settings = structuredClone(config);
@@ -45,7 +46,7 @@ export function createMicrosoftRuntime({ ledger, config, clientSecret }, depende
   const worker = createPublicationWorker({ ledger, connect, adapterFor });
   return Object.freeze({
     async execute(credential, operation, ...args) {
-      if (['addArtefact', 'ingestText'].includes(operation)) throw new Error('Use verified SharePoint import');
+      if (['addArtefact', 'ingestText', 'ingestDocument'].includes(operation)) throw new Error('Use verified SharePoint import');
       const inputs = structuredClone(args);
       const context = await connect(credential);
       const service = createLedgerService({ ledger, verifySession: adapters.verifySession,
@@ -59,14 +60,16 @@ export function createMicrosoftRuntime({ ledger, config, clientSecret }, depende
       if (!actor.roles.some((role) => ['editor', 'reviewer'].includes(role))
         || !actor.matterIds.includes(snapshot.target?.matterId)) throw new Error('Forbidden');
       const remote = await adapterFor(context).read(snapshot.target);
+      const extracted = await extractDocument(remote.bytes, { mediaType: remote.mediaType, attachmentsComplete: snapshot.attachmentsComplete });
       const fresh = await connect(credential);
       const current = actorFrom(fresh);
       const rechecked = await adapterFor(fresh).read(snapshot.target);
       if (rechecked.eTag !== remote.eTag || rechecked.hash !== remote.hash) throw new Error('SharePoint item changed during import');
-      return ledger.ingestText(current, { key: snapshot.key, expectedVersion: snapshot.expectedVersion,
+      if (fresh.identity.expiresAt <= Date.now() || current.tenantId !== actor.tenantId || current.userId !== actor.userId) throw new Error('Access denied');
+      extracted.provenance.remote = { ...snapshot.target, eTag: remote.eTag, hash: remote.hash };
+      return ledger.addArtefact(current, { key: snapshot.key, expectedVersion: snapshot.expectedVersion,
         matterId: snapshot.target.matterId, title: snapshot.title, owner: snapshot.owner, type: snapshot.type,
-        bytes: remote.bytes, mediaType: remote.mediaType, attachmentsComplete: snapshot.attachmentsComplete,
-        remote: { ...snapshot.target, eTag: remote.eTag, hash: remote.hash } });
+        ...extracted });
     },
     publish: worker.run,
     reconcile: worker.reconcile,

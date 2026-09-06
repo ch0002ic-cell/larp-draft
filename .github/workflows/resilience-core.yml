@@ -28,3 +28,5 @@ jobs:
       - run: npm test --prefix resilience-core
       - run: npm run demo --prefix resilience-core
       - run: npm run evaluate --prefix resilience-core
+      - run: npm run evaluate --prefix resilience-core -- --mode hybrid
+      - run: npm run demo:formats --prefix resilience-core

@@ -9,9 +9,13 @@
   "scripts": {
     "test": "node --test *.test.mjs",
     "demo": "node workflow-demo.mjs",
-    "evaluate": "node evaluate.mjs"
+    "evaluate": "node evaluate.mjs",
+    "demo:formats": "node format-demo.mjs"
   },
   "dependencies": {
-    "jose": "6.2.12"
+    "jose": "6.2.12",
+    "pdfjs-dist": "6.3.289",
+    "saxes": "6.0.0",
+    "yauzl": "3.4.0"
   }
 }

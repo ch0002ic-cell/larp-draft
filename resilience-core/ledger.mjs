@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { extractText } from './extraction.mjs';
-import { discoverPhrases } from './discovery.mjs';
+import { discoverPhrases, discoverHybrid } from './discovery.mjs';
 
 // Internal domain API. Actors must come from a trusted authentication/ACL adapter,
 // never from an HTTP request body. No network, model calls or source-file writes.
@@ -176,13 +176,18 @@ export class Ledger {
     if (input.remote) extraction.provenance.remote = structuredClone(input.remote);
     return this.addArtefact(actor, { ...input, ...extraction });
   }
-  discover(actor, assertionId, { phrases, limit = 250 }) {
+  authorizeIngestion(actor, matterId) {
+    actorContext(actor, true);
+    if (!accessible(actor, required(matterId, 'matterId'))) fail('Forbidden');
+  }
+  discover(actor, assertionId, { phrases, citations, mode = 'phrases', limit = 250 }) {
     actorContext(actor);
     const assertion = this.#get(actor, assertionId, 'assertion');
     const source = this.#get(actor, assertion.body.sourceId, 'source');
     if (![assertion, source].every((record) => this.#current(actor, record))) fail('Evidence version superseded');
     const artefacts = this.list(actor, 'artefact').filter((record) => this.#current(actor, record));
-    return { assertionId, ...discoverPhrases(artefacts, phrases, limit) };
+    oneOf(mode, ['phrases', 'hybrid'], 'discovery mode');
+    return { assertionId, ...(mode === 'hybrid' ? discoverHybrid(artefacts, { phrases, citations, limit }) : discoverPhrases(artefacts, phrases, limit)) };
   }
   proposeDependency(actor, input) {
     actorContext(actor, true);
