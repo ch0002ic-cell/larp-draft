@@ -60,7 +60,7 @@ export function createMicrosoftRuntime({ ledger, config, clientSecret }, depende
       if (!actor.roles.some((role) => ['editor', 'reviewer'].includes(role))
         || !actor.matterIds.includes(snapshot.target?.matterId)) throw new Error('Forbidden');
       const remote = await adapterFor(context).read(snapshot.target);
-      const extracted = await extractDocument(remote.bytes, { mediaType: remote.mediaType, attachmentsComplete: snapshot.attachmentsComplete });
+      const extracted = await extractDocument(remote.bytes, { mediaType: remote.mediaType, attachmentsComplete: snapshot.attachmentsComplete, ocr: snapshot.ocr === true });
       const fresh = await connect(credential);
       const current = actorFrom(fresh);
       const rechecked = await adapterFor(fresh).read(snapshot.target);

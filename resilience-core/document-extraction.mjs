@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import { extractText, maxInputBytes } from './extraction.mjs';
 
 export const docxMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-export const documentExtractionVersion = 'rich-document-v1';
+export const documentExtractionVersion = 'rich-document-v2';
 
-export async function extractDocument(bytes, { mediaType, attachmentsComplete = false } = {}, { timeoutMs = 10000 } = {}) {
+export async function extractDocument(bytes, { mediaType, attachmentsComplete = false, ocr = false } = {}, { timeoutMs = ocr === true ? 30000 : 10000 } = {}) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('Byte input required');
   if (mediaType === 'text/plain') return extractText(bytes, { mediaType, attachmentsComplete });
   const data = Uint8Array.from(bytes);
@@ -14,14 +14,14 @@ export async function extractDocument(bytes, { mediaType, attachmentsComplete = 
   const failed = (reason) => ({ extractionVersion: documentExtractionVersion, inventoryComplete: false,
     segments: [{ id: 'document', state: 'failed', reason }], provenance });
   if (data.length > maxInputBytes) return failed('Input exceeds the 1 MiB extraction limit');
-  if (!['application/pdf', docxMediaType].includes(mediaType)) return failed('Unsupported document format');
+  if (!['application/pdf', docxMediaType, ...(ocr === true ? ['image/png'] : [])].includes(mediaType)) return failed('Unsupported document format or OCR not enabled');
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Invalid parser timeout');
   return new Promise((resolve) => {
     let settled = false;
     let worker;
     try {
       worker = new Worker(new URL('./document-parser-worker.mjs', import.meta.url), {
-        workerData: { bytes: data, mediaType }, transferList: [data.buffer],
+        workerData: { bytes: data, mediaType, ocr: ocr === true }, transferList: [data.buffer],
         resourceLimits: { maxOldGenerationSizeMb: 128, stackSizeMb: 4 }, stdout: true, stderr: true,
       });
     } catch { resolve(failed('Document parser could not start')); return; }

@@ -26,6 +26,8 @@ jobs:
           cache-dependency-path: resilience-core/package-lock.json
       - run: npm ci --prefix resilience-core --ignore-scripts --no-audit --no-fund
       - run: npm test --prefix resilience-core
+      - run: npx --prefix resilience-core playwright install --with-deps chromium
+      - run: npm run test:browser --prefix resilience-core
       - run: npm run demo --prefix resilience-core
       - run: npm run evaluate --prefix resilience-core
       - run: npm run evaluate --prefix resilience-core -- --mode hybrid

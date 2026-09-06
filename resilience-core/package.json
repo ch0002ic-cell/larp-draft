@@ -10,12 +10,19 @@
     "test": "node --test *.test.mjs",
     "demo": "node workflow-demo.mjs",
     "evaluate": "node evaluate.mjs",
-    "demo:formats": "node format-demo.mjs"
+    "demo:formats": "node format-demo.mjs",
+    "review": "node review-server.mjs --demo",
+    "test:browser": "playwright test"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
     "jose": "6.2.12",
     "pdfjs-dist": "6.3.289",
     "saxes": "6.0.0",
+    "tesseract.js": "7.0.0",
     "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
   }
 }
