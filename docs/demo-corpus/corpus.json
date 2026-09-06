@@ -4,7 +4,7 @@
     "prepared": "2026-09-05",
     "purpose": "Demo corpus for SMU LIT Hackathon 2026, PS4 'Designing a Sustainable and Resilient LegalTech'. Demonstrates identifying which existing documents a regulatory change affects, in what way, and what must propagate.",
     "provenance": "Five real signed documents belonging to one named individual, shared from a personal Google Drive folder. Read in place; PDFs deliberately not downloaded into the repository.",
-    "safety": "REDACTED. The unredacted originals must never appear in a slide, screenshot, recording, published artifact, repo commit, or third-party API call. See README.md.",
+    "safety": "REDACTED. The unredacted originals must never appear in a slide, screenshot, recording, published artifact, repo commit, or third-party API call. See ../../README.md#research-corpus-and-historical-assets.",
     "primary_demo_regulation": "PDPA2012",
     "verification_policy": "Every legal assertion carries either a source URL that was actually fetched, or an explicit UNVERIFIED marker. Nothing is stated from memory. See unverified_claims at the end of this file.",
     "as_at": "Law checked as at 5 September 2026."
