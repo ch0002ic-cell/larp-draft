@@ -16,7 +16,7 @@ export type GraphContract = {
   downloadUrl: string;
   client?: string;
   documentType?: string;
-  priority?: "Critical" | "High" | "Medium" | "Low";
+  priority?: "Unreviewed" | "Critical" | "High" | "Medium" | "Low";
   prioritySource?: "AI checked" | "Pre-screened";
 };
 

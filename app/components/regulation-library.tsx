@@ -17,9 +17,9 @@ type PdpaComparison = {
   businessImpact: string[];
   caveats: string[];
   generatedAt: string | null;
-  generatedBy: "verified-baseline" | "openai";
+  generatedBy: "openai";
   model: string | null;
-  sourceCoverage: "verified-change-records" | "cached-official-text";
+  sourceCoverage: "cached-official-text";
   sourceDocuments: Array<{ label: string; effectiveDate: string; sourceUrl: string; cached: boolean }>;
 };
 
@@ -27,10 +27,10 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
   const [regulations, setRegulations] = useState<Regulation[]>([]);
   const [selectedId, setSelectedId] = useState("PDPA2012");
   const [query, setQuery] = useState("");
+  const [catalogError, setCatalogError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
-  const [notes, setNotes] = useState("");
+  const [noteDraft, setNoteDraft] = useState<{ id: string; value: string } | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [comparison, setComparison] = useState<PdpaComparison | null>(null);
@@ -41,11 +41,14 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    fetch(`/api/regulations?query=${encodeURIComponent(query)}`, { signal: controller.signal, cache: "no-store" })
-      .then((response) => response.json())
-      .then((data) => { setRegulations(data.regulations ?? []); setTotal(data.count ?? 0); setFetchedAt(data.fetchedAt ?? null); setLoading(false); })
-      .catch((error) => { if (error.name !== "AbortError") setLoading(false); });
+    void Promise.resolve().then(() => {
+    if (controller.signal.aborted) return;
+    setLoading(true); setCatalogError("");
+    return fetch(`/api/regulations?query=${encodeURIComponent(query)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => { if (!response.ok) throw new Error("Regulation catalogue unavailable. Try again after the source service is restored."); return response.json(); })
+      .then((data) => { setRegulations(data.regulations ?? []); setTotal(data.count ?? 0); setLoading(false); })
+      .catch((error) => { if (error.name !== "AbortError") { setLoading(false); setRegulations([]); setCatalogError(error.message); } });
+    });
     return () => controller.abort();
   }, [query, refreshNonce]);
 
@@ -54,13 +57,16 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
   const currentVersion = versions.at(-1);
   const previousVersion = versions.at(-2);
 
-  useEffect(() => { setNotes(selected?.overlay?.internalNotes ?? ""); setSaveState("idle"); }, [selected]);
+  const notes = noteDraft?.id === selected?.id ? noteDraft?.value ?? "" : selected?.overlay?.internalNotes ?? "";
+  const setNotes = (value: string) => { if (selected) setNoteDraft({ id: selected.id, value }); setSaveState("idle"); };
 
   useEffect(() => {
-    if (selected?.id !== "PDPA2012") { setComparison(null); return; }
     const controller = new AbortController();
+    void Promise.resolve().then(() => {
+    if (controller.signal.aborted) return;
+    if (selected?.id !== "PDPA2012") { setComparison(null); return; }
     setComparisonState("loading");
-    fetch("/api/regulations/PDPA2012/comparison", { signal: controller.signal, cache: "no-store" })
+    return fetch("/api/regulations/PDPA2012/comparison", { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? "Comparison unavailable");
@@ -69,6 +75,7 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
         setComparisonState("ready");
       })
       .catch((error) => { if (error.name !== "AbortError") { setComparisonMessage(error.message); setComparisonState("error"); } });
+    });
     return () => controller.abort();
   }, [selected?.id]);
 
@@ -106,7 +113,7 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
           <div className="registry-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search acts and regulations" /></div>
           <div className="registry-list-heading"><span>Showing {regulations.length} of {total} instruments</span><button aria-label="Refresh catalogue" onClick={() => setRefreshNonce((value) => value + 1)}><RefreshCw size={13} /></button></div>
           {loading ? <div className="registry-loading"><LoaderCircle size={18} />Loading official registry</div> : regulations.map((item) => <button className={item.id === selected?.id ? "active" : ""} key={item.id} onClick={() => setSelectedId(item.id)}><span className="law-icon"><BookOpen size={14} /></span><span><strong>{item.title}</strong><small>{item.kind.replace("-", " ")} · {item.status}</small></span><ChevronRight size={13} /></button>)}
-          {!fetchedAt && <div className="catalog-callout"><Clock3 size={14} /><p><strong>Verified starter record</strong>The full SSO catalogue will appear after the first permitted 03:00–07:00 SGT sync.</p></div>}
+          {catalogError && <p role="alert" className="catalog-callout">{catalogError}</p>}
         </aside>
 
         {selected && <section className="registry-detail">
@@ -119,7 +126,7 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
             </div>}
             {selected.id === "WFA2025" && <div className="verified-change"><span><Clock3 size={14} /></span><div><small>READINESS STATUS</small><strong>Passed, published and not yet in force</strong><p>Use this record to prepare employment documents and processes. Do not label a current document as breaching the WFA until the relevant provisions commence.</p><em>Official SSO status: uncommenced</em></div><a href={selected.sourceUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /></a></div>}
             {selected.id === "PDPA2012" && <div className="ai-comparison">
-              <div className="ai-comparison-head"><div><Sparkles size={15} /><span>PDPA CHANGE SUMMARY</span>{comparison && <em>{comparison.generatedBy === "openai" ? `OPENAI · ${comparison.model}` : "VERIFIED BASELINE"}</em>}</div><button onClick={generateComparison} disabled={comparisonState === "generating"}>{comparisonState === "generating" ? <LoaderCircle size={13} /> : <Sparkles size={13} />}{comparison?.generatedBy === "openai" ? "Refresh AI summary" : "Generate with OpenAI"}</button></div>
+              <div className="ai-comparison-head"><div><Sparkles size={15} /><span>PDPA CHANGE SUMMARY</span>{comparison && <em>{`OPENAI · ${comparison.model}`}</em>}</div><button onClick={generateComparison} disabled={comparisonState === "generating"}>{comparisonState === "generating" ? <LoaderCircle size={13} /> : <Sparkles size={13} />}{comparison?.generatedBy === "openai" ? "Refresh AI summary" : "Generate with OpenAI"}</button></div>
               {comparisonState === "loading" && <div className="comparison-loading"><LoaderCircle size={16} />Loading PDPA comparison</div>}
               {comparison && <>
                 <div className="comparison-overview">
@@ -130,7 +137,7 @@ export function RegulationLibrary({ onClose }: { onClose: () => void }) {
                   <nav aria-label="PDPA change areas"><small>{comparison.changes.length} MATERIAL CHANGES</small>{comparison.changes.map((change, index) => <button type="button" className={index === activeChangeIndex ? "active" : ""} key={`${change.area}-${change.effectiveDate}`} onClick={() => setActiveChangeIndex(index)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{change.area}</strong><ChevronRight size={14} /></button>)}</nav>
                   {activeChange && <section className="change-detail"><header><div><span>Effective {activeChange.effectiveDate}</span><strong>{activeChange.area}</strong></div><a href={activeChange.sourceUrl} target="_blank" rel="noreferrer">Official source <ExternalLink size={12} /></a></header><div className="change-before-after"><div className="before-state"><small>BEFORE</small><p>{activeChange.before}</p></div><span className="change-arrow"><ArrowRight size={15} /></span><div className="current-state"><small>CURRENT</small><p>{activeChange.now}</p></div></div><footer><small>OPERATIONAL IMPLICATION</small><p>{activeChange.significance}</p></footer></section>}
                 </div>
-                <div className="comparison-provenance"><ShieldCheck size={13} /><span>{comparison.sourceCoverage === "cached-official-text" ? "Compared using cached official text from both selected dates." : "Based on verified amendment records. Run the overnight regulation sync to cache both full SSO texts."}</span></div>
+                <div className="comparison-provenance"><ShieldCheck size={13} /><span>Compared using cached official text from both selected dates.</span></div>
               </>}
               {comparisonState === "error" && <div className="comparison-error"><AlertCircle size={14} /><span>{comparisonMessage}</span>{!aiConfigured && <small>Add OPENAI_API_KEY to .env.local, then restart the development server.</small>}</div>}
             </div>}

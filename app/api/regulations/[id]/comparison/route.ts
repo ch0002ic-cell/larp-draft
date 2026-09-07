@@ -3,7 +3,6 @@ import {
   pdpaComparisonDates,
   readPdpaComparison,
   readPdpaSourceSnapshot,
-  verifiedPdpaComparison,
   writePdpaComparison,
   type PdpaComparison,
 } from "@/lib/pdpa-comparison";
@@ -31,10 +30,14 @@ function withSourceState(comparison: PdpaComparison, before: Awaited<ReturnType<
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
   const { id } = await params;
   if (id !== "PDPA2012") return Response.json({ error: "Detailed comparison is currently available for PDPA2012." }, { status: 404 });
   const [{ before, current }, comparison] = await Promise.all([sourceState(), readPdpaComparison()]);
   return Response.json({ comparison: withSourceState(comparison, before, current), aiConfigured: Boolean(process.env.OPENAI_API_KEY) });
+  } catch {
+    return Response.json({ error: "Requested records are unavailable. Check the source service and saved evidence." }, { status: 503 });
+  }
 }
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -44,14 +47,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!apiKey) return Response.json({ error: "Add OPENAI_API_KEY to .env.local to generate an AI comparison." }, { status: 503 });
 
   const { before, current } = await sourceState();
-  const hasOfficialText = Boolean(before?.text && current?.text);
-  const evidence = hasOfficialText
-    ? changedTextEvidence(before!.text, current!.text)
-    : {
-        removed: "Official text snapshots have not been cached yet.",
-        added: JSON.stringify(verifiedPdpaComparison.changes),
-      };
-  const allowedSources = [...new Set(verifiedPdpaComparison.changes.map((change) => change.sourceUrl))];
+  if (!before?.text || !current?.text) return Response.json({ error: "Both official source snapshots are required. Run the authorised source sync first." }, { status: 409 });
+  const evidence = changedTextEvidence(before.text, current.text);
+  const allowedSources = [before.sourceUrl, current.sourceUrl];
   const model = process.env.OPENAI_MODEL ?? "gpt-5-mini";
   const schema = {
     type: "object",
@@ -95,7 +93,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         },
         {
           role: "user",
-          content: `Compare the Personal Data Protection Act 2012 version effective ${pdpaComparisonDates.before} with the version effective ${pdpaComparisonDates.current}.\n\nSOURCE COVERAGE: ${hasOfficialText ? "Cached official SSO text from both dates" : "Verified amendment records; full SSO text snapshots are not cached yet"}\n\nTEXT PRESENT BEFORE BUT NOT CURRENT:\n${evidence.removed}\n\nTEXT PRESENT CURRENT BUT NOT BEFORE:\n${evidence.added}\n\nAllowed source URLs (use only these):\n${allowedSources.join("\n")}`,
+          content: `Compare the Personal Data Protection Act 2012 version effective ${pdpaComparisonDates.before} with the version effective ${pdpaComparisonDates.current}.\n\nSOURCE COVERAGE: Cached official SSO text from both dates\n\nTEXT PRESENT BEFORE BUT NOT CURRENT:\n${evidence.removed}\n\nTEXT PRESENT CURRENT BUT NOT BEFORE:\n${evidence.added}\n\nAllowed source URLs (use only these):\n${allowedSources.join("\n")}`,
         },
       ],
       // A reasoning model spends this budget on its own reasoning before it
@@ -111,21 +109,18 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (!text) return Response.json({ error: responseRefusal(response) || "OpenAI returned no comparison." }, { status: 502 });
     const generated = JSON.parse(text) as Pick<PdpaComparison, "headline" | "executiveSummary" | "changes" | "businessImpact" | "caveats">;
     const safeSources = new Set(allowedSources);
+    if (generated.changes.some((change) => !safeSources.has(change.sourceUrl))) throw new Error("Comparison contains an unsupported source citation.");
     const comparison: PdpaComparison = {
-      ...verifiedPdpaComparison,
+      pipelineVersion: 2,
+      regulationId: "PDPA2012", fromDate: pdpaComparisonDates.before, toDate: pdpaComparisonDates.current,
+      sourceDocuments: [before, current].map((snapshot) => ({ label: snapshot.effectiveDate, effectiveDate: snapshot.effectiveDate, sourceUrl: snapshot.sourceUrl, cached: true })),
       ...generated,
-      headline: hasOfficialText ? generated.headline : "Verified PDPA amendment-record comparison: 2 January 2021 to 5 December 2025",
-      changes: generated.changes.map((change) => ({ ...change, sourceUrl: safeSources.has(change.sourceUrl) ? change.sourceUrl : verifiedPdpaComparison.sourceDocuments[1].sourceUrl })),
       generatedAt: new Date().toISOString(),
       generatedBy: "openai",
       model,
-      sourceCoverage: hasOfficialText ? "cached-official-text" : "verified-change-records",
+      sourceCoverage: "cached-official-text",
     };
-    try {
-      await writePdpaComparison(comparison);
-    } catch {
-      // The generated result can still be returned when the configured R2 key is read-only.
-    }
+    await writePdpaComparison(comparison);
     return Response.json({ comparison: withSourceState(comparison, before, current), aiConfigured: true });
   } catch (error) {
     console.error("PDPA comparison failed", error, (error as { cause?: unknown } | null)?.cause);

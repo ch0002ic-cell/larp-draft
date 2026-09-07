@@ -48,6 +48,7 @@ export function WorkspaceHome() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [query, setQuery] = useState("");
+  const [intakeError, setIntakeError] = useState("");
   const [intake, setIntake] = useState<IntakeRecord[]>([]);
   const regulation = WORKSPACE_REGULATIONS.find(
     (item) => item.id === selected,
@@ -70,11 +71,11 @@ export function WorkspaceHome() {
 
   useEffect(() => {
     fetch("/api/regulations/intake", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : { records: [] }))
+      .then((response) => { if (!response.ok) throw new Error("Reviewed team intake is unavailable."); return response.json(); })
       .then((body: { records?: IntakeRecord[] }) =>
         setIntake(body.records ?? []),
       )
-      .catch(() => setIntake([]));
+      .catch((error: Error) => setIntakeError(error.message));
   }, []);
 
   const matching = useMemo(
@@ -298,6 +299,7 @@ export function WorkspaceHome() {
             </p>
           </div>
           <div className="intake-lane__records">
+            {intakeError && <p role="alert">{intakeError}</p>}
             {intake.slice(0, 3).map((record) => (
               <article key={record.id}>
                 <span>{record.shortName}</span>
@@ -311,7 +313,7 @@ export function WorkspaceHome() {
                 </div>
               </article>
             ))}
-            {intake.length === 0 && (
+            {!intakeError && intake.length === 0 && (
               <p>No additional changes have been confirmed.</p>
             )}
           </div>

@@ -14,7 +14,7 @@ const cachePrefix = "Regulations/review-cache/";
 // treated as v1.
 // v2: prod moved from gpt-5-mini to gpt-5.6-sol, so v1 entries describe a
 // different model than the one now named in each review.
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 
 export type CachedContractReview = {
   contractKey: string;
@@ -32,24 +32,18 @@ const cacheKeyFor = (contractKey: string, regulationId: string) =>
   `${cachePrefix}${regulationId}-${createHash("sha256").update(contractKey).digest("hex").slice(0, 32)}.json`;
 
 export async function readCachedReview(contractKey: string, regulationId: string, fingerprint: string) {
-  try {
+  {
     const response = await getR2Object(cacheKeyFor(contractKey, regulationId));
-    if (!response.ok) return null;
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("Review cache unavailable.");
     const value = await response.json() as Partial<CachedContractReview>;
     if (!value.review || value.fingerprint !== fingerprint) return null;
     if ((value.version ?? "v1") !== CACHE_VERSION) return null;
     return value as CachedContractReview;
-  } catch {
-    return null;
   }
 }
 
 export async function writeCachedReview(entry: Omit<CachedContractReview, "cachedAt" | "version">) {
-  try {
-    await putR2Json(cacheKeyFor(entry.contractKey, entry.regulationId), { ...entry, version: CACHE_VERSION, cachedAt: new Date().toISOString() });
-    return true;
-  } catch {
-    // A cache write must never fail the review the user just waited for.
-    return false;
-  }
+  await putR2Json(cacheKeyFor(entry.contractKey, entry.regulationId), { ...entry, version: CACHE_VERSION, cachedAt: new Date().toISOString() });
+  return true;
 }

@@ -3,6 +3,7 @@ import { readRegulationCatalog, readRegulationOverlays, writeRegulationOverlay, 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  try {
   const url = new URL(request.url);
   const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
   const kind = url.searchParams.get("kind");
@@ -20,6 +21,9 @@ export async function GET(request: Request) {
     .map((item) => ({ ...item, overlay: overlayById.get(item.id) ?? null }));
 
   return Response.json({ ...catalog, count: matched.length, page, limit, regulations });
+  } catch {
+    return Response.json({ error: "Requested records are unavailable. Check the source service and saved evidence." }, { status: 503 });
+  }
 }
 
 export async function PATCH(request: Request) {

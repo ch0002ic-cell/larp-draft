@@ -8,7 +8,7 @@ import { downloadBlob, fileStem } from "@/lib/download";
 import { buildWorkingCopy, readDocxParagraphs, type EditableParagraph } from "@/lib/docx-working-copy";
 import { regulationById, type RegulationId } from "@/lib/regulatory-workspace";
 import type { ContractEditSuggestion, ContractReviewResult } from "@/lib/contract-review-model";
-import { cacheContractReview, readCachedContractReview } from "@/lib/contract-review-cache";
+import { readPersistedContractReview } from "@/lib/contract-review-client";
 import { ContractClauseReview } from "./contract-clause-review";
 import { ContractFullDocument } from "./contract-full-document";
 import { ReviewSessionTimer } from "./review-session-timer";
@@ -54,9 +54,9 @@ export function ContractEditor({ contractKey, regulationId }: { contractKey: str
 
   useEffect(() => {
     let active = true;
-    readCachedContractReview(contractKey, regulationId).then((cached) => {
+    readPersistedContractReview(contractKey, regulationId).then((cached) => {
       if (active && cached) { setReview(cached); setMessage("Saved AI review loaded from the priority queue."); }
-    });
+    }).catch((error: Error) => { if (active) { setMessage(error.message); setState("error"); } });
     return () => { active = false; };
   }, [contractKey, regulationId]);
 
@@ -86,7 +86,7 @@ export function ContractEditor({ contractKey, regulationId }: { contractKey: str
       const response = await fetch("/api/contracts/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: contractKey, regulationId }) });
       const data = await response.json() as { review?: ContractReviewResult; error?: string };
       if (!response.ok || !data.review) throw new Error(data.error || "The AI review could not be completed.");
-      setReview(data.review); await cacheContractReview(contractKey, regulationId, data.review); setMessage("Drafting suggestions are ready and saved in this browser.");
+      setReview(data.review); setMessage("Drafting suggestions are ready and saved to the review service.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "The AI review could not be completed."); }
     finally { setReviewing(false); }
   };

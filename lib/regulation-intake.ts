@@ -56,12 +56,12 @@ export function sanitizeDraft(input: LawChangeDraft): LawChangeDraft {
 }
 
 export async function readSavedLawChanges(): Promise<SavedLawChange[]> {
-  try {
-    const response = await getR2Object(intakeKey);
-    if (!response.ok) return [];
-    const value = await response.json();
-    return Array.isArray(value) ? value as SavedLawChange[] : [];
-  } catch { return []; }
+  const response = await getR2Object(intakeKey);
+  if (response.status === 404) return [];
+  if (!response.ok) throw new Error("Saved law changes unavailable.");
+  const value = await response.json();
+  if (!Array.isArray(value)) throw new Error("Invalid saved law changes.");
+  return value as SavedLawChange[];
 }
 
 export async function saveLawChange(draft: LawChangeDraft) {

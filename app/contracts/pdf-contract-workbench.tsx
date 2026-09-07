@@ -7,7 +7,7 @@ import { LarpHeader } from "@/components/larp-header";
 import { buildDocxBlob } from "@/lib/docx";
 import { downloadBlob, fileStem } from "@/lib/download";
 import type { ContractEditSuggestion, ContractReviewResult } from "@/lib/contract-review-model";
-import { cacheContractReview, readCachedContractReview } from "@/lib/contract-review-cache";
+import { readPersistedContractReview } from "@/lib/contract-review-client";
 import { regulationById, type RegulationId } from "@/lib/regulatory-workspace";
 import { ContractClauseReview } from "./contract-clause-review";
 import { ReviewSessionTimer } from "./review-session-timer";
@@ -31,17 +31,17 @@ export function PdfContractWorkbench({ contractKey, regulationId }: { contractKe
       const response = await fetch("/api/contracts/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: contractKey, regulationId }) });
       const data = await response.json() as { review?: ContractReviewResult; error?: string };
       if (!response.ok || !data.review) throw new Error(data.error || "The PDF could not be reviewed.");
-      setReview(data.review); await cacheContractReview(contractKey, regulationId, data.review); setState("idle"); setMessage("AI suggestions are ready and saved in this browser.");
+      setReview(data.review); setState("idle"); setMessage("AI suggestions are ready and saved to the review service.");
     } catch (error) { setState("error"); setMessage(error instanceof Error ? error.message : "The PDF could not be reviewed."); }
   }, [contractKey, regulationId]);
 
   useEffect(() => {
     let active = true;
-    readCachedContractReview(contractKey, regulationId).then((cached) => {
+    readPersistedContractReview(contractKey, regulationId).then((cached) => {
       if (!active) return;
       if (cached) { setReview(cached); setState("idle"); setMessage("Saved AI review loaded from the priority queue."); }
       else void runReview();
-    });
+    }).catch((error: Error) => { if (active) { setMessage(error.message); setState("error"); } });
     return () => { active = false; };
   }, [contractKey, regulationId, runReview]);
 

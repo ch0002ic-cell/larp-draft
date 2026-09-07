@@ -3,9 +3,6 @@ import { readFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Ledger } from './ledger.mjs';
-import { LocalDocumentStore } from './local-document-store.mjs';
-import { prepareWorkflow, syntheticActor, syntheticConnect } from './workflow-fixtures.mjs';
-import { createPublicationWorker } from './publication-worker.mjs';
 import { createMicrosoftRuntime } from './microsoft-runtime.mjs';
 
 const staticFiles = new Map([
@@ -13,13 +10,6 @@ const staticFiles = new Map([
   ['/app.js', ['review-ui/app.js', 'text/javascript']],
   ['/style.css', ['review-ui/style.css', 'text/css']],
 ]);
-export function demoRuntime() {
-  const ledger = new Ledger(':memory:'), store = new LocalDocumentStore();
-  prepareWorkflow(ledger, store);
-  const worker = createPublicationWorker({ ledger, connect: syntheticConnect, adapterFor: () => store });
-  return { execute: async (_credential, operation, ...args) => ledger[operation](syntheticActor, ...args),
-    publish: worker.run, reconcile: worker.reconcile, close: () => { ledger.close(); store.close(); } };
-}
 // Local operator console only. No remote binding, cookies, browser tokens or arbitrary domain operations.
 export function createReviewServer({ runtime, credential, demo = false }) {
   const token = randomBytes(32).toString('hex');
@@ -83,24 +73,22 @@ export function createReviewServer({ runtime, credential, demo = false }) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.umask(0o077);
-  const demo = process.argv[2] === '--demo';
   let ledger, runtime;
   try {
-    if (!demo && process.argv[2] !== '--microsoft') throw new Error('Choose --demo or --microsoft');
-    if (demo) runtime = demoRuntime();
-    else {
+    if (process.argv[2] !== '--microsoft') throw new Error('Microsoft configuration required');
+    {
       if (!process.env.LARP_ACCESS_TOKEN || !process.env.LARP_LEDGER_PATH) throw new Error('Configuration required');
       const config = JSON.parse(readFileSync(process.env.LARP_MICROSOFT_CONFIG, 'utf8'));
       ledger = new Ledger(process.env.LARP_LEDGER_PATH);
       runtime = createMicrosoftRuntime({ ledger, config, clientSecret: process.env.LARP_ENTRA_CLIENT_SECRET });
     }
-    const server = createReviewServer({ runtime, credential: process.env.LARP_ACCESS_TOKEN, demo });
+    const server = createReviewServer({ runtime, credential: process.env.LARP_ACCESS_TOKEN });
     server.on('error', () => { console.error('Review console could not start. Check local configuration and port availability.'); runtime?.close?.(); ledger?.close(); process.exitCode = 1; });
-    server.listen(4173, '127.0.0.1', () => console.log(`L.A.R.P. ${demo ? 'synthetic demo' : 'Microsoft operator console'}: http://127.0.0.1:4173`));
+    server.listen(4173, '127.0.0.1', () => console.log(`L.A.R.P. Microsoft operator console: http://127.0.0.1:4173`));
     const stop = () => server.close(() => { runtime?.close?.(); ledger?.close(); });
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
   } catch {
     runtime?.close?.(); ledger?.close();
-    console.error('Review console requires --demo or --microsoft with local Microsoft configuration and credentials.'); process.exitCode = 1;
+    console.error('Review console requires --microsoft with Microsoft configuration and credentials.'); process.exitCode = 1;
   }
 }

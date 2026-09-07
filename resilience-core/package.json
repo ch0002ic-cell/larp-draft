@@ -11,7 +11,7 @@
     "demo": "node workflow-demo.mjs",
     "evaluate": "node evaluate.mjs",
     "demo:formats": "node format-demo.mjs",
-    "review": "node review-server.mjs --demo",
+    "review": "node review-server.mjs --microsoft",
     "test:browser": "playwright test"
   },
   "dependencies": {

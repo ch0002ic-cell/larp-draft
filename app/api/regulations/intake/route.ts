@@ -3,7 +3,11 @@ import { readSavedLawChanges, saveLawChange, type LawChangeDraft } from "@/lib/r
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  try {
   return Response.json({ records: await readSavedLawChanges() });
+  } catch {
+    return Response.json({ error: "Requested records are unavailable. Check the source service and saved evidence." }, { status: 503 });
+  }
 }
 
 export async function POST(request: Request) {

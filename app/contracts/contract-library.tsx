@@ -16,9 +16,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { LarpHeader } from "@/components/larp-header";
 import {
-  cacheContractReview,
-  readCachedContractReview,
-} from "@/lib/contract-review-cache";
+  readPersistedContractReview,
+} from "@/lib/contract-review-client";
 import type { ContractReviewResult } from "@/lib/contract-review-model";
 import { DOCUMENT_TYPES } from "@/lib/contract-metadata";
 import {
@@ -28,7 +27,7 @@ import {
 } from "@/lib/regulatory-workspace";
 import { TopDownContractGraph } from "@/app/resilience/top-down-contract-graph";
 
-type Priority = "Critical" | "High" | "Medium" | "Low";
+type Priority = "Unreviewed" | "Critical" | "High" | "Medium" | "Low";
 type Contract = {
   id: string;
   key: string;
@@ -49,38 +48,17 @@ type ReviewState = {
 };
 
 const priorityOrder: Record<Priority, number> = {
+  Unreviewed: 4,
   Critical: 0,
   High: 1,
   Medium: 2,
   Low: 3,
 };
 
-function initialPriority(
-  contract: Contract,
-  regulationId: RegulationId,
-): Priority {
-  const value = `${contract.name} ${contract.key}`.toLowerCase();
-  const direct =
-    regulationId === "WFA2025"
-      ? /employment|employee|offer|intern|staff|workplace/.test(value)
-      : /privacy|personal data|data protection|processing|security|confidential|nda/.test(
-          value,
-        );
-  if (
-    direct &&
-    ["Agreement", "Offer letter", "Policy"].includes(contract.documentType)
-  )
-    return "High";
-  if (["Agreement", "Offer letter", "Policy"].includes(contract.documentType))
-    return "Medium";
-  return "Low";
-}
-
 function aiPriority(
   review: ContractReviewResult | undefined,
-  fallback: Priority,
 ): Priority {
-  if (!review) return fallback;
+  if (!review) return "Unreviewed";
   if (review.suggestions.some((item) => item.confidence === "high"))
     return "Critical";
   if (review.suggestions.length) return "High";
@@ -117,7 +95,7 @@ export function ContractLibrary({
         const savedReviews = await Promise.all(
           items.map(async (contract) => ({
             contract,
-            review: await readCachedContractReview(contract.key, regulationId),
+            review: await readPersistedContractReview(contract.key, regulationId),
           })),
         );
         savedReviews.forEach(({ contract, review }) => {
@@ -152,7 +130,6 @@ export function ContractLibrary({
             ...contract,
             priority: aiPriority(
               review,
-              initialPriority(contract, regulationId),
             ),
             reviewState: reviews[contract.key],
           };
@@ -182,7 +159,7 @@ export function ContractLibrary({
             priorityOrder[a.priority] - priorityOrder[b.priority] ||
             a.name.localeCompare(b.name),
         ),
-    [client, documentType, priority, query, regulationId, relevant, reviews],
+    [client, documentType, priority, query, relevant, reviews],
   );
 
   const checkable = visible
@@ -222,7 +199,6 @@ export function ContractLibrary({
           }));
           throw new Error(data.error);
         }
-        await cacheContractReview(contract.key, regulationId, data.review);
         setReviews((current) => ({
           ...current,
           [contract.key]: { state: "ready", review: data.review },
@@ -479,8 +455,8 @@ export function ContractLibrary({
         )}
         <p className="contracts-footnote">
           <Cloud size={13} />
-          Priority is initially inferred from regulation, document type and
-          filename. AI results override it when a material clause is found.
+          Documents remain unreviewed until an AI review is available. A qualified
+          reviewer must assess the resulting priority and suggested changes.
         </p>
       </main>
     </div>

@@ -17,7 +17,7 @@ import {
   type RegulationId,
 } from "@/lib/regulatory-workspace";
 import { DOCUMENT_TYPES } from "@/lib/contract-metadata";
-import { readCachedContractReview } from "@/lib/contract-review-cache";
+import { readPersistedContractReview } from "@/lib/contract-review-client";
 import type { ContractReviewResult } from "@/lib/contract-review-model";
 import { SummaryImpactGraph } from "./summary-impact-graph";
 
@@ -104,7 +104,7 @@ export function SummaryDocumentFilter({
         const cached = await Promise.all(
           items.map(async (contract) => ({
             key: contract.key,
-            review: await readCachedContractReview(contract.key, regulationId),
+            review: await readPersistedContractReview(contract.key, regulationId),
           })),
         );
         setSavedReviews(

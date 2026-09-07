@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { once } from 'node:events';
-import { createReviewServer, demoRuntime } from './review-server.mjs';
+import { demoRuntime } from './review-test-fixture.mjs';
+import { createReviewServer } from './review-server.mjs';
 async function setup(t) {
   const runtime = demoRuntime(), server = createReviewServer({ runtime, demo: true });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');

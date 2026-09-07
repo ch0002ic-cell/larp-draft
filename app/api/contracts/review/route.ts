@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { getR2Object } from "@/lib/r2";
 import { isRegulationId, regulationById } from "@/lib/regulatory-workspace";
@@ -50,6 +51,24 @@ const schema = {
   },
 };
 
+export async function GET(request: Request) {
+  const query = new URL(request.url).searchParams;
+  const key = query.get("key") ?? "", regulationId = query.get("regulationId");
+  const prefix = process.env.R2_CONTRACT_PREFIX ?? "Contracts/";
+  if (!key.startsWith(prefix) || key.includes("..") || !isRegulationId(regulationId)) return Response.json({ error: "Invalid review request." }, { status: 400 });
+  try {
+    const source = await getR2Object(key);
+    if (!source.ok) throw new Error("Source unavailable");
+    const bytes = new Uint8Array(await source.arrayBuffer());
+    if (bytes.byteLength > MAX_BYTES) return Response.json({ error: "Document exceeds review size budget." }, { status: 413 });
+    const fingerprint = source.headers.get("etag")?.replaceAll('"', "") || createHash("sha256").update(bytes).digest("hex");
+    const saved = await readCachedReview(key, regulationId, fingerprint);
+    return Response.json({ review: saved?.review ?? null }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return Response.json({ error: "Saved review unavailable." }, { status: 503 });
+  }
+}
+
 export async function POST(request: Request) {
   const startedAt = Date.now();
   const apiKey = process.env.OPENAI_API_KEY;
@@ -68,7 +87,7 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await source.arrayBuffer());
     if (bytes.byteLength > MAX_BYTES) return Response.json({ error: "This contract is larger than the 20 MB review limit." }, { status: 413 });
 
-    const fingerprint = source.headers.get("etag")?.replaceAll('"', "") || `size-${bytes.byteLength}`;
+    const fingerprint = source.headers.get("etag")?.replaceAll('"', "") || createHash("sha256").update(bytes).digest("hex");
     const cached = await readCachedReview(key, body.regulationId, fingerprint);
     if (cached) {
       // Target a total response time in the 5-10s window, absorbing the R2 read
@@ -97,7 +116,8 @@ export async function POST(request: Request) {
     const parsed = JSON.parse(responseText(raw)) as Omit<ContractReviewResult, "model">;
     const paragraphs = extension === "docx" ? knownParagraphs : parsed.paragraphs.map((paragraph, index) => ({ index, text: String(paragraph.text ?? "") })).filter((paragraph) => paragraph.text.trim()).slice(0, 1200);
     const validIndexes = new Set(paragraphs.map((paragraph) => paragraph.index));
-    const suggestions = parsed.suggestions.slice(0, 20).map((item, index) => ({ ...item, id: item.id || `suggestion-${index}`, paragraphIndex: Number(item.paragraphIndex), sourceUrl: isAllowedSource(item.sourceUrl) ? item.sourceUrl : regulation.sourceUrl })).filter((item) => item.action !== "amend" || validIndexes.has(item.paragraphIndex));
+    if (parsed.suggestions.some((item) => !isAllowedSource(item.sourceUrl))) throw new Error("Review contains an unsupported source citation.");
+    const suggestions = parsed.suggestions.slice(0, 20).map((item, index) => ({ ...item, id: item.id || `suggestion-${index}`, paragraphIndex: Number(item.paragraphIndex) })).filter((item) => item.action !== "amend" || validIndexes.has(item.paragraphIndex));
     const reviewedCount = extension === "docx" ? reviewParagraphs.length : Math.min(paragraphs.length, REVIEW_PARAGRAPH_LIMIT);
     const scopeCaveat = paragraphs.length > reviewedCount ? [`Only the opening ${reviewedCount} of ${paragraphs.length} paragraphs were analysed. Later clauses have not been reviewed.`] : [];
     const result: ContractReviewResult = { ...parsed, paragraphs, suggestions, sources: parsed.sources.filter((source) => isAllowedSource(source.url)).slice(0, 12), caveats: [...scopeCaveat, ...parsed.caveats].slice(0, 10), model: process.env.OPENAI_MODEL ?? "gpt-5-mini" };

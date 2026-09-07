@@ -47,7 +47,8 @@ export async function GET() {
 
     if (manifestObject) {
       const response = await getR2Object(manifestKey);
-      if (response.ok) {
+      if (!response.ok) throw new Error("Contract manifest unavailable.");
+      {
         const parsed = (await response.json()) as
           | ContractManifestItem[]
           | { contracts?: ContractManifestItem[] };

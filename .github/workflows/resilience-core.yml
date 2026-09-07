@@ -3,9 +3,9 @@ name: Resilience core
 on:
   push:
     branches: [main]
-    paths: ['resilience-core/**', '.github/workflows/resilience-core.yml']
+    paths: ['lib/**', 'app/**', 'resilience-core/**', '.github/workflows/resilience-core.yml']
   pull_request:
-    paths: ['resilience-core/**', '.github/workflows/resilience-core.yml']
+    paths: ['lib/**', 'app/**', 'resilience-core/**', '.github/workflows/resilience-core.yml']
   workflow_dispatch:
 
 permissions:
