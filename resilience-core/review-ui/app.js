@@ -1,3 +1,4 @@
+import { assessmentWorkspace } from './assessments.js';
 const $ = (id) => document.getElementById(id);
 const session = await fetch('/session').then((response) => response.json());
 $('mode').textContent = session.demo ? 'Synthetic demonstration · changes reset when the server stops · not legal advice'
@@ -8,12 +9,15 @@ async function api(input) {
   const response = await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Larp-Token': session.token }, body: JSON.stringify(input) });
   const data = await response.json(); if (!response.ok) throw new Error(data.error); return data;
 }
+let inProgress = false;
 async function run(action) {
-  document.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+  if (inProgress) return;
+  inProgress = true;
+  document.querySelectorAll('button, input, select, textarea').forEach((button) => { button.disabled = true; });
   $('status').textContent = 'Working…';
   try { await action(); $('status').textContent = 'Up to date.'; }
   catch (error) { $('status').textContent = error.message; }
-  finally { document.querySelectorAll('button').forEach((button) => { button.disabled = false; }); }
+  finally { inProgress = false; document.querySelectorAll('button, input, select, textarea').forEach((button) => { button.disabled = false; }); }
 }
 function button(parent, title, action) { const node = el('button', title, parent); node.addEventListener('click', () => run(action)); return node; }
 function reviewForm(parent, label, action) {
@@ -67,5 +71,6 @@ async function refresh() {
   if (!changes.length) { $('detail').replaceChildren(); el('p', 'No accessible change sets. Prepare reviewed assessments and proposed changes using the maintenance service.', $('detail')); }
   else await view(changes.some((change) => change.id === selected) ? selected : changes[0].id);
 }
+$('assessments').addEventListener('click', () => run(() => assessmentWorkspace({ api, run, el, button, root: $('detail'), queue: $('queue'), openChange: view })));
 $('refresh').addEventListener('click', () => run(refresh));
 await run(refresh);

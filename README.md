@@ -74,7 +74,7 @@ SSO also lists **S 580/2026, Personal Data Protection (Amendment No. 2) Regulati
 | Dependency discovery | Phrase matching, proximity matching and instrument/section-reference retrieval with exact evidence spans. |
 | Identity and access | Microsoft Entra ID token validation, delegated Graph access and configured role/matter memberships. |
 | Document integration | SharePoint imports from approved folders, version checks, reviewed text publication and destination verification. |
-| Review console | Source inspection, proposed wording, legal decisions, owner decisions, publication and reconciliation. |
+| Review console | Evidence selection, scoped assessment authoring, reviewer decisions, proposed revisions, owner decisions, publication and reconciliation. |
 | Recovery | Durable publication records, bounded retries, destination reconciliation and verified database backup/restore. |
 
 The maintenance service and its review console are separate from the web application. Microsoft integration is implemented and covered by simulated-provider tests; tenant acceptance forms a delivery milestone.
@@ -83,7 +83,7 @@ The maintenance service and its review console are separate from the web applica
 
 Each source carries its jurisdiction, provision, lifecycle, effective date, retrieval time and content hash. A reviewer records an assertion’s interpretation, applicability, exceptions and exact supporting source span. Artefacts retain immutable versions and an explicit extraction inventory.
 
-Candidate dependencies require review before confirmation. Assessments are scoped to an assertion and artefact segment. A no-impact decision requires complete supplied evidence and context; extraction failures require investigation. New source or artefact versions trigger renewed review while preserving decision history.
+Candidate dependencies require review before confirmation. Assessments are scoped to an assertion and artefact segment. The review console supports passage selection, findings, applicability reasoning, evidence investigations and explicit context confirmation; each saved version requires its own reviewer decision. A no-impact decision requires complete supplied evidence and context; extraction failures require investigation. New source or artefact versions trigger renewed review while preserving decision history.
 
 Change sets pin assessment decisions, document versions, owners and publication targets. Both legal and owner approval are required. Publication supports complete single-segment text artefacts; executed agreements follow a legal variation process, and automated controls require their own release process.
 
@@ -151,7 +151,7 @@ node resilience-core/microsoft-cli.mjs check-config
 npm run review --prefix resilience-core
 ```
 
-The console listens on `http://127.0.0.1:4173` and operates as the configured token holder. Use a protected operator session. Microsoft access is rechecked for each operation, and credentials remain on the server. Browser sign-in and multi-user deployment are planned delivery milestones.
+The console listens on `http://127.0.0.1:4173` and operates as the configured token holder. Select **Assess document evidence** to prepare and review an assessment, then create a proposed text revision from an approved actionable finding. Use a protected operator session. Microsoft access is rechecked for each operation, and credentials remain on the server. Browser sign-in and multi-user deployment are planned delivery milestones.
 
 The [operator CLI](resilience-core/microsoft-cli.mjs) accepts JSON on standard input:
 
@@ -215,7 +215,7 @@ Test fixtures are isolated from the operational console. The ten-case synthetic 
 | Legal rule pack | Named reviewer, approved corpus, source versions, applicability, exceptions and recorded assertions. |
 | Extraction and retrieval | Representative-format evaluation, reviewed OCR output and comparative semantic-retrieval assessment. |
 | Source maintenance | Approved feeds, provision-level commencement/transition reasoning and recurring discovery. |
-| Product integration | Browser sign-in, import/assessment authoring, owner workflows and accessibility validation. |
+| Product integration | Browser sign-in, document-import authoring, multi-item change preparation and accessibility validation; assessment authoring and single-document change preparation are implemented. |
 | Production operations | Approved deployment, protected data lifecycle, load testing, monitoring and recovery exercises. |
 | Supervised pilot | Measured finding quality, reviewer effort, propagation completeness and resource use against the firm’s baseline. |
 

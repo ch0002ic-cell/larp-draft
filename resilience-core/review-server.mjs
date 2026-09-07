@@ -3,11 +3,14 @@ import { readFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Ledger } from './ledger.mjs';
+import { assessmentActions, executeAssessmentAction } from './review-assessments.mjs';
 import { createMicrosoftRuntime } from './microsoft-runtime.mjs';
 
 const staticFiles = new Map([
   ['/', ['review-ui/index.html', 'text/html']],
   ['/app.js', ['review-ui/app.js', 'text/javascript']],
+  ['/assessments.js', ['review-ui/assessments.js', 'text/javascript']],
+  ['/evidence-selection.js', ['review-ui/evidence-selection.mjs', 'text/javascript']],
   ['/style.css', ['review-ui/style.css', 'text/css']],
 ]);
 // Local operator console only. No remote binding, cookies, browser tokens or arbitrary domain operations.
@@ -45,7 +48,8 @@ export function createReviewServer({ runtime, credential, demo = false }) {
       }
       const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       let result;
-      if (input.action === 'list') result = await runtime.execute(credential, 'list', 'change_set');
+      if (assessmentActions.has(input.action)) result = await executeAssessmentAction(runtime, credential, input);
+      else if (input.action === 'list') result = await runtime.execute(credential, 'list', 'change_set');
       else if (input.action === 'view') {
         const change = await runtime.execute(credential, 'getChangeSet', input.id);
         const evidence = [];
